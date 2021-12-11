@@ -7,6 +7,7 @@ import pylibyaml
 import yaml
 import pickle
 from colorama import Style, Fore
+from segtypes.common.group import CommonSegGroup
 from segtypes.segment import Segment
 from segtypes.linker_entry import LinkerWriter, to_cname
 from util import log
@@ -23,6 +24,7 @@ parser.add_argument("--basedir", help="a directory in which to extract the rom")
 parser.add_argument("--modes", nargs="+", default="all")
 parser.add_argument("--verbose", action="store_true", help="Enable debug logging")
 parser.add_argument("--use-cache", action="store_true", help="Only split changed segments in config")
+parser.add_argument("--visualize", action="store_true", help="Visualize the configuration file")
 
 linker_writer: LinkerWriter
 config: Dict[str, Any]
@@ -133,6 +135,57 @@ def merge_configs(main_config, additional_config):
                 main_config[curkey] = additional_config[curkey]
 
     return main_config
+
+def visualize(config_path, base_dir, target_path):
+    import plotly.graph_objects as go
+
+    global config
+
+    # Load config
+    config = {}
+    for entry in config_path:
+        with open(entry) as f:
+            additional_config = yaml.load(f.read(), Loader=yaml.SafeLoader)
+        config = merge_configs(config, additional_config)
+
+    options.initialize(config, config_path, base_dir, target_path)
+
+    labels = ["rom"]
+    parents = [""]
+    values = [0]
+    types = ["rom"]
+
+    # Initialize segments
+    all_segments = initialize_segments(config["segments"])
+
+    for segment in all_segments:
+        if isinstance(segment, CommonSegGroup):
+            for sub in segment.subsegments:
+                if sub.size:
+                    if sub.name == segment.name:
+                        labels.append(sub.name + "_sub")
+                    else:
+                        labels.append(sub.name)
+                    parents.append(segment.name)
+                    types.append(sub.type)
+                    values.append(sub.size)
+
+        labels.append(segment.name)
+        parents.append("rom")
+        types.append(segment.type)
+        values.append(segment.size)
+
+    fig = go.Figure(go.Treemap(
+        branchvalues="remainder",
+        labels = labels,
+        values = values,
+        parents = parents,
+        root_color="lightblue",
+    ))
+
+    fig.update_layout(margin = dict(t=50, l=25, r=25, b=25))
+
+    fig.show()
 
 def main(config_path, base_dir, target_path, modes, verbose, use_cache=True):
     global config
@@ -311,4 +364,7 @@ def main(config_path, base_dir, target_path, modes, verbose, use_cache=True):
 
 if __name__ == "__main__":
     args = parser.parse_args()
-    main(args.config, args.basedir, args.target, args.modes, args.verbose, args.use_cache)
+    if args.visualize:
+        visualize(args.config, args.basedir, args.target)
+    else:
+        main(args.config, args.basedir, args.target, args.modes, args.verbose, args.use_cache)
